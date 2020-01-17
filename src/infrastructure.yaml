@@ -1,20 +1,323 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  A highly available infrastructure for serving a website that can scale up and down according to load and which is
+  replicated across two zones.
+
 Parameters:
-# whatever you consider a changing value, put it as a parameter instead of hard-coding it into your script
+  UdacityS3ReadOnlyEC2RoleName:
+    Type: String
+    Description: The IAM role name that will be used for creating the role.
+    Default: UdacityS3ReadOnlyEC2Role
+
 Resources:
+
+  # ===========================================================================
+  #region Network Resources
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ---------------------------------------------------------------------------
+  #region Private Subnet 1
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+
+  PrivateSubnet1RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateSubnet1DefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateSubnet1RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateSubnet1RouteTable
+  # endregion - Private Subnet 1
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  #region Private Subnet 2
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs '']
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+
+  PrivateSubnet2RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateSubnet2DefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateSubnet2RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateSubnet2RouteTable
+  # endregion Private Subnet 2
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # region Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs '']
+
+  PublicSubnetsDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicSubnetsRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetsRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicSubnetsRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicSubnetsRouteTable
+  # endregion Public Subnets
+  # ---------------------------------------------------------------------------
+
+  # endregion Network Resources
+  # ===========================================================================
+
+  # ===========================================================================
+  #region Application Resources
+
+  # ---------------------------------------------------------------------------
+  #region IAM Role
+
   #instace profile contains the IAM Role name(s) that we want to associate to our auto scaling EC2 Servers
   ProfileWithRolesForOurApp:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles:
-        - UdacityS3ReadOnlyEC2
+        - !Ref UdacityS3ReadOnlyEC2Role
 
-          #!/bin/bash
-          apt-get update -y
-          apt-get install unzip awscli -y
-          apt-get install apache2 -y
-          systemctl start apache2.service
-          cd /var/www/html
-          aws s3 cp s3://udacity-demo-1/udacity.zip .
-          unzip -o udacity.zip
+  UdacityS3ReadOnlyEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref UdacityS3ReadOnlyEC2RoleName
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        }
+      Policies:
+        - PolicyName: ReadUdacityS3BucketPolicy
+          PolicyDocument: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "s3:GetObject",
+                  "Resource": "arn:aws:s3:::udacity-demo-1/udacity.zip"
+                }
+              ]
+            }
+
+  #endregion IAM Role
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  #region Web Servers
+
+  WebServersLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: "/dev/sda1"
+            Ebs:
+              VolumeSize: 10
+              SnapshotId: snap-02e105f83f77cd927
+              VolumeType: gp2
+        CreditSpecification:
+          CpuCredits: standard
+        IamInstanceProfile:
+          Name: !Ref ProfileWithRolesForOurApp
+        ImageId: ami-04b9e92b5572fa0d1
+        InstanceType: t3.medium
+        SecurityGroupIds:
+          - !Ref WebServersSecurityGroup
+        UserData: |
+          IyEvYmluL2Jhc2gKYXB0LWdldCB1cGRhdGUgLXkKYXB0LWdldCBpbnN0YWxsIHVuemlwIGF3c2Ns
+          aSAteQphcHQtZ2V0IGluc3RhbGwgYXBhY2hlMiAteQpzeXN0ZW1jdGwgc3RhcnQgYXBhY2hlMi5z
+          ZXJ2aWNlCmNkIC92YXIvd3d3L2h0bWwKYXdzIHMzIGNwIHMzOi8vdWRhY2l0eS1kZW1vLTEvdWRh
+          Y2l0eS56aXAgLgp1bnppcCAtbyB1ZGFjaXR5LnppcAo=
+
+  WebServersAutoscalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: 4
+      MaxSize: 8
+      HealthCheckGracePeriod: 180
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebServersLaunchTemplate
+        Version: 1
+      TargetGroupARNs:
+        - !Ref WebServersTargetGroup
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  WebServersSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: The first security group of the application server instances
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: !GetAtt VPC.CidrBlock
+          FromPort: 80
+          ToPort: 80
+
+  WebServersTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+
+  #endregion Web Servers
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  #region Load Balancer
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Port: 80
+      Protocol: HTTP
+      LoadBalancerArn: !Ref LoadBalancer
+      DefaultActions:
+        - TargetGroupArn: !Ref WebServersTargetGroup
+          Type: forward
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: The security group of the application load balancer instances
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          CidrIp: !GetAtt VPC.CidrBlock
+          FromPort: 80
+          ToPort: 80
+
+  #endregion Load Balancer
+  # ---------------------------------------------------------------------------
+
+  #endregion Application Resources
+  # ===========================================================================
+
+
 Outputs:
-#Bonus points for useful outputs!
+
+  LoadBalancerDnsName:
+    Description: The DNS name to reach the website.
+    Value: !Sub http://${LoadBalancer.DNSName}
