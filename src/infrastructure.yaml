@@ -9,6 +9,12 @@ Parameters:
     Type: String
     Description: The IAM role name that will be used for creating the role.
     Default: UdacityS3ReadOnlyEC2Role
+  BastionHostAllowedIpv4Address:
+    Type: String
+    Description: The IPv4 address that will be used to access the bastion host from the internet.
+  BastionHostKeyName:
+    Type: String
+    Description: The name of the ssh key that will be used to access the bastion host.
 
 Resources:
 
@@ -315,9 +321,55 @@ Resources:
   #endregion Application Resources
   # ===========================================================================
 
+  # ===========================================================================
+  #region Bastion Host
+  Bastion:
+    Type: AWS::EC2::Instance
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sda1"
+          Ebs:
+            VolumeSize: 10
+            SnapshotId: snap-02e105f83f77cd927
+            VolumeType: gp2
+      CreditSpecification:
+        CPUCredits: standard
+      ImageId: ami-04b9e92b5572fa0d1
+      InstanceType: t3.medium
+      KeyName: !Ref BastionHostKeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet1
+          GroupSet:
+            - !Ref BastionSecurityGroup
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: The security group of the bastion host to access the application server instances
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: !Sub ${BastionHostAllowedIpv4Address}/32
+          FromPort: 22
+          ToPort: 22
+
+  #endregion Bastion Host
+  # ===========================================================================
+
 
 Outputs:
 
   LoadBalancerDnsName:
     Description: The DNS name to reach the website.
     Value: !Sub http://${LoadBalancer.DNSName}
+
+  BastionPublicIpv4Address:
+    Description: The IP address of the bastion host.
+    Value: !GetAtt Bastion.PublicIp
+
+  BastionAllowedIpv4Address:
+    Description: The IPv4 address that is allowed to access the bastion host from the internet.
+    Value: !Ref BastionHostAllowedIpv4Address
